@@ -1,0 +1,119 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Symfony\Component\Process\Process;
+use Symfony\Component\Process\Exception\ProcessFailedException;
+
+class StreamController extends Controller
+{
+    public function startStream(Request $request)
+    {
+        $inputFile = storage_path('app/public/rain.mp4');
+        $streamKeys = $request->input('streamKeys');
+        $ffmpegPath = 'C:\ffmpeg\bin\ffmpeg.exe';  // Update this path based on your ffmpeg installation
+
+        if (!file_exists($inputFile)) {
+            return response()->json(['error' => 'Input file not found'], 404);
+        }
+
+        $processes = [];
+
+        foreach ($streamKeys as $streamKey) {
+            $rtmpUrl = 'rtmp://a.rtmp.youtube.com/live2/' . $streamKey;
+
+            $process = new Process([
+                $ffmpegPath,
+                '-re',
+                '-i', $inputFile,
+                '-c:v', 'libx264',  // Specify the video codec
+                '-c:a', 'aac',      // Specify the audio codec
+                '-b:v', '3000k',    // Set the video bitrate
+                '-b:a', '128k',     // Set the audio bitrate
+                '-f', 'flv',
+                '-loglevel', 'debug',  // Enable detailed logging
+                $rtmpUrl
+            ]);
+
+            $process->setTimeout(null);
+            set_time_limit(0);
+
+            $process->start();
+
+            $processes[] = $process;
+        }
+
+        // Handle process output in parallel
+        foreach ($processes as $process) {
+            $process->wait(function ($type, $buffer) {
+                if (Process::ERR === $type) {
+                    echo 'ERR > ' . $buffer;
+                } else {
+                    echo 'OUT > ' . $buffer;
+                }
+            });
+
+            if (!$process->isSuccessful()) {
+                return response()->json(['error' => (new ProcessFailedException($process))->getMessage()], 500);
+            }
+        }
+
+        return response()->json(['success' => 'Streaming started successfully for all keys']);
+    }
+}
+
+
+
+
+// ========================
+
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Symfony\Component\Process\Process;
+use Symfony\Component\Process\Exception\ProcessFailedException;
+
+class StreamController extends Controller
+{
+    public function stream()
+    {
+        $inputFile = storage_path('app/public/rain.mp4');
+        $rtmpUrl = 'rtmp://a.rtmp.youtube.com/live2/ft2w-ew7r-uvx9-crks-24ya';
+
+        if (!file_exists($inputFile)) {
+            return response()->json(['error' => 'Input file not found'], 404);
+        }
+
+        $process = new Process([
+            'ffmpeg',
+            '-re',
+            '-i', $inputFile,
+            '-f', 'flv',
+            $rtmpUrl
+        ]);
+
+        $process->setTimeout(null);
+        set_time_limit(0);
+
+        try {
+            $process->run(function ($type, $buffer) {
+                if (Process::ERR === $type) {
+                    echo 'ERR > ' . $buffer;
+                } else {
+                    echo 'OUT > ' . $buffer;
+                }
+            });
+
+            if (!$process->isSuccessful()) {
+                throw new ProcessFailedException($process);
+            }
+
+            return response()->json(['success' => 'Streaming started successfully']);
+        } catch (ProcessFailedException $exception) {
+            return response()->json(['error' => $exception->getMessage()], 500);
+        }
+    }
+}
